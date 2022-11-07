@@ -27,7 +27,7 @@ const corsOptions = {
 
 // Middlewares
 app.use(express.json());
-app.use(cookieParser());
+app.use(cookieParser("some_secret_untold"));
 app.use(cors(corsOptions));
 app.use(morgan("tiny"));
 
@@ -38,19 +38,24 @@ app.use(morgan("tiny"));
 //
 const authGuard = async (req, res, next) => {
   const { authtoken } = req.headers;
-  const { uid } = req.query;
   try {
     const decoded = jwt.verify(authtoken, SECRET_JWT);
-    if (decoded.uid === uid) {
+    if (decoded) {
       res.decoded = {};
       res.decoded = decoded;
       next();
     } else {
-      res.send({ error: true, message: "Unauthorized action attempted" }).end();
+      res
+        .status(403)
+        .send({ error: true, message: "Unauthorized action attempted" })
+        .end();
     }
   } catch (error) {
     console.error(error.message);
-    res.send({ error: true, message: "Auth-z failed. Invalid Token" }).end();
+    res
+      .status(403)
+      .send({ error: true, message: "Auth-z failed. Invalid Token" })
+      .end();
   }
 };
 //-----------------------------------------
@@ -59,6 +64,7 @@ const authGuard = async (req, res, next) => {
 
 // Collections
 let productsCollection;
+let paymentsCollection;
 //--------------------
 
 MongoClient.connect(DB_URI, function (err, client) {
@@ -68,6 +74,7 @@ MongoClient.connect(DB_URI, function (err, client) {
   }
 
   productsCollection = client.db("TESTDATA").collection("ema_john_products");
+  paymentsCollection = client.db("TESTDATA").collection("payments");
   console.log("DB CONNECTED");
 });
 
@@ -75,14 +82,19 @@ MongoClient.connect(DB_URI, function (err, client) {
 
 // --------------- API END POINTS / REQUEST HANDLERS ---------
 app.get("/", authGuard, async (req, res) => {
-  const data = await productsCollection.find({}).toArray();
+  try {
+    const query = { uid: res.decoded.uid };
+    const data = await paymentsCollection.find(query).toArray();
 
-  res.status(200).send({
-    error: false,
-    message: "SERVER is UP and RUnning",
-    decoded: res.decoded,
-    data,
-  });
+    res.status(200).send({
+      error: false,
+      message: "SERVER is UP and RUnning",
+      data,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(501).send({ error: true, message: "Query Failed" });
+  }
 });
 
 // Token Signing API END point
@@ -99,3 +111,33 @@ app.get("/auth", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`SERVER is running at port: ${PORT}`));
+
+// TEST POST DATA API END point
+app.post("/test-post", authGuard, async (req, res) => {
+  try {
+    const payLoad = req.body;
+    const uid = res.decoded.uid;
+    payLoad["uid"] = uid;
+    const response = await paymentsCollection.insertOne(payLoad);
+    res.status(200).send(response);
+  } catch (error) {
+    console.error(error);
+    res.status(501).send({ error: true, message: "POST failed" });
+  }
+});
+
+// TEST DELETE DATA API END point
+app.delete("/test-delete", authGuard, async (req, res) => {
+  try {
+    const uid = res.decoded.uid;
+    const query = {
+      _id: ObjectId(req.headers.delete_id),
+      uid: res.decoded.uid,
+    };
+    const response = await paymentsCollection.deleteOne(query);
+    res.status(200).send(response);
+  } catch (error) {
+    console.error(error);
+    res.status(501).send({ error: true, message: "DELETE failed" });
+  }
+});
