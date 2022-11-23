@@ -10,7 +10,7 @@ const morgan = require("morgan");
 // -------------------- Initializations --------------------
 require("dotenv").config(); // dotenv
 const app = express(); // express
-const { MongoClient, ObjectId } = mongodb;
+const { MongoClient, ObjectId, ServerApiVersion } = mongodb;
 //-----------------------------------------
 
 //------------------- Accessing Secrets --------------------
@@ -62,82 +62,82 @@ const authGuard = async (req, res, next) => {
 
 //---------------- CONNECT MONGODB -------------------
 
-// Collections
-let productsCollection;
-let paymentsCollection;
-//--------------------
-
-MongoClient.connect(DB_URI, function (err, client) {
-  if (err) {
-    console.error("DB connection failed");
-    console.error(err);
-  }
-
-  productsCollection = client.db("TESTDATA").collection("ema_john_products");
-  paymentsCollection = client.db("TESTDATA").collection("payments");
-  console.log("DB CONNECTED");
+const client = new MongoClient(DB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+  serverApi: ServerApiVersion.v1,
 });
 
-//-----------------------------------------
+async function run() {
+  const productsCollection = client
+    .db("TESTDATA")
+    .collection("ema_john_products");
+  const paymentsCollection = client.db("TESTDATA").collection("payments");
 
-// --------------- API END POINTS / REQUEST HANDLERS ---------
-app.get("/", authGuard, async (req, res) => {
-  try {
-    const query = { uid: res.decoded.uid };
-    const data = await paymentsCollection.find(query).toArray();
+  // --------------- API END POINTS / REQUEST HANDLERS ---------
+  app.get("/", authGuard, async (req, res) => {
+    try {
+      const query = { uid: res.decoded.uid };
+      const data = await paymentsCollection.find(query).toArray();
 
-    res.status(200).send({
-      error: false,
-      message: "SERVER is UP and RUnning",
-      data,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(501).send({ error: true, message: "Query Failed" });
-  }
-});
+      res.status(200).send({
+        error: false,
+        message: "SERVER is UP and Running",
+        data,
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(501).send({ error: true, message: "Query Failed" });
+    }
+  });
 
-// Token Signing API END point
-app.get("/auth", async (req, res) => {
-  const { uid } = req.headers;
-  const authtoken = jwt.sign({ uid }, SECRET_JWT);
-  /*
+  // Token Signing API END point
+  app.get("/auth", async (req, res) => {
+    const { uid } = req.headers;
+    if (uid) {
+      const authtoken = jwt.sign({ uid }, SECRET_JWT);
+      /*
   res.cookie("authtoken", JSON.stringify(authtoken), {
     httpOnly: true,
     secure: true,
   });
   */
-  res.status(200).send({ error: false, authtoken });
-});
+      res.status(200).send({ error: false, authtoken });
+    } else {
+      res.status(404).send({ error: true, message: "No UID was provided" });
+    }
+  });
 
+  // TEST POST DATA API END point
+  app.post("/test-post", authGuard, async (req, res) => {
+    try {
+      const payLoad = req.body;
+      const uid = res.decoded.uid;
+      payLoad["uid"] = uid;
+      const response = await paymentsCollection.insertOne(payLoad);
+      res.status(200).send(response);
+    } catch (error) {
+      console.error(error);
+      res.status(501).send({ error: true, message: "POST failed" });
+    }
+  });
+
+  // TEST DELETE DATA API END point
+  app.delete("/test-delete", authGuard, async (req, res) => {
+    try {
+      const uid = res.decoded.uid;
+      const query = {
+        _id: ObjectId(req.headers.delete_id),
+        uid: res.decoded.uid,
+      };
+      const response = await paymentsCollection.deleteOne(query);
+      res.status(200).send(response);
+    } catch (error) {
+      console.error(error);
+      res.status(501).send({ error: true, message: "DELETE failed" });
+    }
+  });
+}
+
+run().catch((error) => console.error(error));
 app.listen(PORT, () => console.log(`SERVER is running at port: ${PORT}`));
-
-// TEST POST DATA API END point
-app.post("/test-post", authGuard, async (req, res) => {
-  try {
-    const payLoad = req.body;
-    const uid = res.decoded.uid;
-    payLoad["uid"] = uid;
-    const response = await paymentsCollection.insertOne(payLoad);
-    res.status(200).send(response);
-  } catch (error) {
-    console.error(error);
-    res.status(501).send({ error: true, message: "POST failed" });
-  }
-});
-
-// TEST DELETE DATA API END point
-app.delete("/test-delete", authGuard, async (req, res) => {
-  try {
-    const uid = res.decoded.uid;
-    const query = {
-      _id: ObjectId(req.headers.delete_id),
-      uid: res.decoded.uid,
-    };
-    const response = await paymentsCollection.deleteOne(query);
-    res.status(200).send(response);
-  } catch (error) {
-    console.error(error);
-    res.status(501).send({ error: true, message: "DELETE failed" });
-  }
-});
